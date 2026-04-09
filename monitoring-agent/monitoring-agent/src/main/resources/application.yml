@@ -1,0 +1,113 @@
+spring:
+  application:
+    name: monitoring-agent
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+  datasource:
+    url: jdbc:h2:mem:monitoringdb;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+server:
+  port: 8080
+
+# ─── Agent Configuration ────────────────────────────────────────────────────
+agent:
+  poll-interval-ms: 60000         # how often the scheduler fires (ms)
+
+  site247:
+    api-key: ${SITE247_API_KEY:demo-key}
+    base-url: https://api.site24x7.com/api
+    device-ids:
+      - "DEVICE_ID_1"
+      - "DEVICE_ID_2"
+
+  thresholds:
+    cpu-spike-delta: 30.0          # % jump above baseline → SPIKE
+    cpu-high: 80.0                 # sustained high threshold
+    cpu-critical: 95.0
+    memory-high: 85.0
+    memory-critical: 95.0
+    disk-high: 90.0
+    disk-critical: 98.0
+
+  history:
+    window-size: 10                # rolling window (Redis list length)
+    cooldown-minutes: 15           # suppress duplicate alerts per host+metric
+
+  llm:
+    enabled: ${LLM_ENABLED:true}
+    provider: claude               # claude | ollama
+    model: claude-sonnet-4-20250514
+    api-key: ${CLAUDE_API_KEY:}
+    max-tokens: 512
+    timeout-seconds: 10
+    # For Ollama (local): set provider=ollama and base-url below
+    ollama-base-url: http://localhost:11434
+
+  slack:
+    enabled: ${SLACK_ENABLED:false}
+    webhook-url: ${SLACK_WEBHOOK_URL:}
+
+  webhook:
+    enabled: ${WEBHOOK_ENABLED:false}
+    url: ${ALERT_WEBHOOK_URL:}
+    secret: ${ALERT_WEBHOOK_SECRET:}
+
+  pagerduty:
+    enabled: ${PAGERDUTY_ENABLED:false}
+    integration-key: ${PAGERDUTY_KEY:}
+
+# ─── Resilience4j ───────────────────────────────────────────────────────────
+resilience4j:
+  circuitbreaker:
+    instances:
+      site247:
+        sliding-window-size: 5
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 2
+      llm:
+        sliding-window-size: 3
+        failure-rate-threshold: 80
+        wait-duration-in-open-state: 60s
+  retry:
+    instances:
+      site247:
+        max-attempts: 3
+        wait-duration: 1s
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+
+# ─── Actuator ───────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# ─── Logging ────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.ossom.monitoring: DEBUG
+    org.springframework.web.client: WARN
